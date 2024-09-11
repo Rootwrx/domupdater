@@ -1,243 +1,168 @@
-class DomUpdater {
-    update(parentElement, markup, { update = null, ignore = [] } = {}) {
-        if (!(parentElement instanceof Element)) {
-            throw new Error("parentElement must be a valid DOM element");
-        }
+class DOMUpdater {
+    constructor() {
+        this.parser = new DOMParser();
+    }
 
-        // Add this condition to compare text content
-        if (parentElement.textContent.trim() === markup.trim()) {
-            console.log("Content is identical, skipping update");
-            return;
-        }
+    update(element, newMarkup, options = {}) {
+        const { update = [], ignore = [] } = options;
+        const oldMarkup = element.outerHTML;
+        const newDoc = this.parser.parseFromString(
+            `<div>${newMarkup}</div>`,
+            "text/html"
+        );
+        const newElement = newDoc.body.firstElementChild;
 
-        const tempContainer = document.createElement("div");
-        tempContainer.innerHTML = markup.trim();
-        const updatedNodes = new Set();
+        const isParentIncluded =
+        newElement.children.length === 1 &&
+        newElement.firstElementChild.tagName === element.tagName;
 
-        if (update) {
-            this._updateSelectedElements(
-                parentElement,
-                tempContainer,
+        if (isParentIncluded) {
+            this.updateElementAndChildren(
+                element,
+                newElement.firstElementChild,
                 update,
-                ignore,
-                updatedNodes
+                ignore
             );
         } else {
-            this._updateChildNodes(
-                parentElement,
-                tempContainer,
-                ignore,
-                updatedNodes
-            );
-        }
-    }
-    _updateSelectedElements(
-        currentElement,
-        newElement,
-        selectors,
-        ignoreSelectors,
-        updatedNodes
-    ) {
-        const selectorList = Array.isArray(selectors) ? selectors : [selectors];
-
-        selectorList.forEach((selector) => {
-            const currentNodes = currentElement.querySelectorAll(selector);
-            const newNodes = newElement.querySelectorAll(selector);
-
-            currentNodes.forEach((currentNode, index) => {
-                if (index < newNodes.length) {
-                    this._updateNode(
-                        currentNode,
-                        newNodes[index],
-                        ignoreSelectors,
-                        updatedNodes
-                    );
-                } else {
-                    currentNode.remove();
-                    console.log(`Removed element matching selector: ${selector}`);
-                }
-            });
-
-            if (newNodes.length > currentNodes.length) {
-                for (let i = currentNodes.length; i < newNodes.length; i++) {
-                    const parentInCurrent = this._findParentInCurrent(
-                        currentElement,
-                        newNodes[i],
-                        selector
-                    );
-                    if (parentInCurrent) {
-                        parentInCurrent.appendChild(newNodes[i].cloneNode(true));
-                        console.log(`Added new element matching selector: ${selector}`);
-                    }
-                }
-            }
-        });
-
-        // Update remaining nodes that weren't updated by selectors
-        this._updateChildNodes(
-            currentElement,
-            newElement,
-            ignoreSelectors,
-            updatedNodes
-        );
-    }
-
-    _findParentInCurrent(currentElement, newNode, selector) {
-        const newParent = newNode.parentElement;
-        if (!newParent) return currentElement;
-
-        const parentSelector = this._getUniqueSelector(newParent);
-        return currentElement.querySelector(parentSelector) || currentElement;
-    }
-
-    _getUniqueSelector(element) {
-        if (element.id) return `#${element.id}`;
-        if (element.className) return `.${element.className.split(" ").join(".")}`;
-        return element.tagName.toLowerCase();
-    }
-
-    _updateNode(currentNode, newNode, ignoreSelectors, updatedNodes) {
-        if (!currentNode || !newNode || updatedNodes.has(currentNode)) return;
-
-        if (this._shouldIgnore(currentNode, ignoreSelectors)) {
-            console.log(`Ignored node: ${currentNode.nodeName}`);
-            return;
+            this.updateChildren(element, newElement, update, ignore);
         }
 
-        updatedNodes.add(currentNode);
-
-        if (
-            currentNode.nodeType !== newNode.nodeType ||
-            currentNode.nodeName !== newNode.nodeName
-        ) {
-            currentNode.parentNode.replaceChild(newNode.cloneNode(true), currentNode);
-            console.log(
-                `Replaced node: ${currentNode.nodeName} with ${newNode.nodeName}`
-            );
-            return;
-        }
-
-        switch (currentNode.nodeType) {
-            case Node.ELEMENT_NODE:
-                this._updateElementNode(
-                    currentNode,
-                    newNode,
-                    ignoreSelectors,
-                    updatedNodes
-                );
-                break;
-            case Node.TEXT_NODE:
-                this._updateTextNode(currentNode, newNode);
-                break;
-            case Node.COMMENT_NODE:
-                this._updateCommentNode(currentNode, newNode);
-                break;
-        }
+        this.preserveParentAttributes(element, element);
     }
 
-    _updateElementNode(
-        currentElement,
-        newElement,
-        ignoreSelectors,
-        updatedNodes
-    ) {
-        this._updateAttributes(currentElement, newElement);
-        this._updateChildNodes(
-            currentElement,
-            newElement,
-            ignoreSelectors,
-            updatedNodes
-        );
+    updateElementAndChildren(oldElement, newElement, update, ignore) {
+        if (!this.shouldIgnore(oldElement, ignore)) {
+            this.updateAttributes(oldElement, newElement);
+        }
+        this.updateChildren(oldElement, newElement, update, ignore);
     }
 
-    _updateAttributes(currentElement, newElement) {
-        const currentAttrs = Array.from(currentElement.attributes);
-        const newAttrs = Array.from(newElement.attributes);
-
-        currentAttrs.forEach((attr) => {
-            if (!newElement.hasAttribute(attr.name)) {
-                currentElement.removeAttribute(attr.name);
-                console.log(`Removed attribute: ${attr.name}`);
-            }
-        });
-
-        newAttrs.forEach((attr) => {
+    updateAttributes(oldElement, newElement) {
+        // Remove attributes not present in the new element
+        for (let i = oldElement.attributes.length - 1; i >= 0; i--) {
+            const attr = oldElement.attributes[i];
             if (
-                !currentElement.hasAttribute(attr.name) ||
-                currentElement.getAttribute(attr.name) !== attr.value
+                !newElement.hasAttribute(attr.name) &&
+                !attr.name.startsWith("data-")
             ) {
-                currentElement.setAttribute(attr.name, attr.value);
-                console.log(`Updated attribute: ${attr.name} = ${attr.value}`);
+                oldElement.removeAttribute(attr.name);
             }
-        });
+        }
+
+        // Add or update attributes from the new element
+        for (const attr of newElement.attributes) {
+            if (oldElement.getAttribute(attr.name) !== attr.value) {
+                oldElement.setAttribute(attr.name, attr.value);
+            }
+        }
     }
 
-    _updateChildNodes(currentElement, newElement, ignoreSelectors, updatedNodes) {
-        const currentChildNodes = Array.from(currentElement.childNodes);
-        const newChildNodes = Array.from(newElement.childNodes);
+    updateChildren(oldElement, newElement, update, ignore) {
+        const oldChildren = Array.from(oldElement.childNodes);
+        const newChildren = Array.from(newElement.childNodes);
 
-        let currentIndex = 0;
+        let oldIndex = 0;
         let newIndex = 0;
 
-        while (
-            currentIndex < currentChildNodes.length ||
-            newIndex < newChildNodes.length
-        ) {
-            const currentChild = currentChildNodes[currentIndex];
-            const newChild = newChildNodes[newIndex];
+        while (oldIndex < oldChildren.length || newIndex < newChildren.length) {
+            const oldChild = oldChildren[oldIndex];
+            const newChild = newChildren[newIndex];
 
-            if (this._isEmptyTextNode(currentChild)) {
-                currentIndex++;
-                continue;
-            }
-            if (this._isEmptyTextNode(newChild)) {
+            if (!oldChild) {
+                // Add new child
+                if (!this.shouldIgnore(newChild, ignore)) {
+                    oldElement.appendChild(this.cloneNode(newChild));
+                }
                 newIndex++;
-                continue;
-            }
-
-            if (!newChild) {
-                currentElement.removeChild(currentChild);
-                console.log(`Removed child node: ${currentChild.nodeName}`);
-                currentIndex++;
-            } else if (!currentChild) {
-                currentElement.appendChild(newChild.cloneNode(true));
-                console.log(`Added child node: ${newChild.nodeName}`);
+            } else if (!newChild) {
+                // Remove old child
+                if (!this.shouldIgnore(oldChild, ignore)) {
+                    oldElement.removeChild(oldChild);
+                } else {
+                    oldIndex++;
+                }
+            } else if (this.isSameNode(oldChild, newChild)) {
+                // Update existing child
+                this.updateChild(oldChild, newChild, oldElement, update, ignore);
+                oldIndex++;
                 newIndex++;
             } else {
-                this._updateNode(currentChild, newChild, ignoreSelectors, updatedNodes);
-                currentIndex++;
-                newIndex++;
+                // Nodes are different
+                if (this.shouldIgnore(oldChild, ignore)) {
+                    oldIndex++;
+                } else if (this.shouldIgnore(newChild, ignore)) {
+                    newIndex++;
+                } else {
+                    oldElement.insertBefore(this.cloneNode(newChild), oldChild);
+                    newIndex++;
+                }
             }
         }
     }
 
-    _isEmptyTextNode(node) {
+    isSameNode(node1, node2) {
         return (
-            node && node.nodeType === Node.TEXT_NODE && node.textContent.trim() === ""
+            node1.nodeType === node2.nodeType && node1.nodeName === node2.nodeName
         );
     }
 
-    _updateTextNode(currentNode, newNode) {
-        if (currentNode.textContent !== newNode.textContent) {
-            currentNode.textContent = newNode.textContent;
-            console.log(`Updated text node: ${newNode.textContent}`);
+    updateChild(oldChild, newChild, parentElement, update, ignore) {
+        if (this.shouldIgnore(oldChild, ignore)) {
+            return;
+        }
+
+        if (this.shouldUpdate(oldChild, update)) {
+            if (oldChild.nodeType === Node.TEXT_NODE) {
+                if (oldChild.nodeValue !== newChild.nodeValue) {
+                    oldChild.nodeValue = newChild.nodeValue;
+                }
+            } else if (oldChild.nodeType === Node.ELEMENT_NODE) {
+                this.updateAttributes(oldChild, newChild);
+                this.updateChildren(oldChild, newChild, update, ignore);
+            }
         }
     }
 
-    _updateCommentNode(currentNode, newNode) {
-        if (currentNode.data !== newNode.data) {
-            currentNode.data = newNode.data;
-            console.log(`Updated comment node: ${newNode.data}`);
+    preserveParentAttributes(element, originalElement) {
+        // Preserve all attributes
+        for (const attr of originalElement.attributes) {
+            if (
+                !element.hasAttribute(attr.name) ||
+                element.getAttribute(attr.name) !== attr.value
+            ) {
+                element.setAttribute(attr.name, attr.value);
+            }
         }
     }
 
-    _shouldIgnore(node, ignoreSelectors) {
-        return ignoreSelectors.some(
-            (selector) =>
-            (node.matches && node.matches(selector)) ||
-            (node.closest && node.closest(selector))
+    shouldIgnore(element, ignore) {
+        return (
+            element &&
+            element.nodeType === Node.ELEMENT_NODE &&
+            ignore.some((selector) => element.matches(selector))
         );
+    }
+
+    shouldUpdate(element, update) {
+        return (
+            update.length === 0 ||
+            (element &&
+            element.nodeType === Node.ELEMENT_NODE &&
+            update.some((selector) => element.matches(selector)))
+        );
+    }
+
+    cloneNode(node) {
+        if (node.nodeType === Node.TEXT_NODE) {
+            return document.createTextNode(node.nodeValue);
+        }
+        const clone = node.cloneNode(false);
+        for (const child of node.childNodes) {
+            clone.appendChild(this.cloneNode(child));
+        }
+        return clone;
     }
 }
 
-export default new DomUpdater();
+
+export default new DOMUpdater();
