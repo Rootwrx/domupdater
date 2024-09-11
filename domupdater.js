@@ -5,7 +5,7 @@ class DOMUpdater {
 
     update(element, newMarkup, options = {}) {
         const { update = [], ignore = [] } = options;
-        const oldMarkup = element.outerHTML;
+        const originalAttributes = this.getAttributes(element);
         const newDoc = this.parser.parseFromString(
             `<div>${newMarkup}</div>`,
             "text/html"
@@ -27,7 +27,11 @@ class DOMUpdater {
             this.updateChildren(element, newElement, update, ignore);
         }
 
-        this.preserveParentAttributes(element, element);
+        this.preserveAttributes(
+            element,
+            originalAttributes,
+            isParentIncluded ? newElement.firstElementChild : null
+        );
     }
 
     updateElementAndChildren(oldElement, newElement, update, ignore) {
@@ -38,23 +42,22 @@ class DOMUpdater {
     }
 
     updateAttributes(oldElement, newElement) {
+        const oldAttributes = Array.from(oldElement.attributes);
+        const newAttributes = Array.from(newElement.attributes);
+
         // Remove attributes not present in the new element
-        for (let i = oldElement.attributes.length - 1; i >= 0; i--) {
-            const attr = oldElement.attributes[i];
-            if (
-                !newElement.hasAttribute(attr.name) &&
-                !attr.name.startsWith("data-")
-            ) {
+        oldAttributes.forEach((attr) => {
+            if (!newElement.hasAttribute(attr.name)) {
                 oldElement.removeAttribute(attr.name);
             }
-        }
+        });
 
         // Add or update attributes from the new element
-        for (const attr of newElement.attributes) {
+        newAttributes.forEach((attr) => {
             if (oldElement.getAttribute(attr.name) !== attr.value) {
                 oldElement.setAttribute(attr.name, attr.value);
             }
-        }
+        });
     }
 
     updateChildren(oldElement, newElement, update, ignore) {
@@ -77,7 +80,11 @@ class DOMUpdater {
             } else if (!newChild) {
                 // Remove old child
                 if (!this.shouldIgnore(oldChild, ignore)) {
-                    oldElement.removeChild(oldChild);
+                    if (oldChild.parentNode === oldElement) {
+                        oldElement.removeChild(oldChild);
+                    } else {
+                        oldIndex++;
+                    }
                 } else {
                     oldIndex++;
                 }
@@ -93,7 +100,11 @@ class DOMUpdater {
                 } else if (this.shouldIgnore(newChild, ignore)) {
                     newIndex++;
                 } else {
-                    oldElement.insertBefore(this.cloneNode(newChild), oldChild);
+                    if (oldChild.parentNode === oldElement) {
+                        oldElement.insertBefore(this.cloneNode(newChild), oldChild);
+                    } else {
+                        oldElement.appendChild(this.cloneNode(newChild));
+                    }
                     newIndex++;
                 }
             }
@@ -123,16 +134,31 @@ class DOMUpdater {
         }
     }
 
-    preserveParentAttributes(element, originalElement) {
-        // Preserve all attributes
-        for (const attr of originalElement.attributes) {
-            if (
-                !element.hasAttribute(attr.name) ||
-                element.getAttribute(attr.name) !== attr.value
-            ) {
-                element.setAttribute(attr.name, attr.value);
+    preserveAttributes(element, originalAttributes, newParentElement) {
+        const attributesToPreserve = newParentElement
+        ? this.mergeAttributes(
+            originalAttributes,
+            this.getAttributes(newParentElement)
+        )
+        : originalAttributes;
+
+        Object.entries(attributesToPreserve).forEach(([name, value]) => {
+            if (element.getAttribute(name) !== value) {
+                element.setAttribute(name, value);
             }
-        }
+        });
+    }
+
+    getAttributes(element) {
+        const attributes = {};
+        Array.from(element.attributes).forEach((attr) => {
+            attributes[attr.name] = attr.value;
+        });
+        return attributes;
+    }
+
+    mergeAttributes(original, updated) {
+        return { ...original, ...updated };
     }
 
     shouldIgnore(element, ignore) {
@@ -165,4 +191,4 @@ class DOMUpdater {
 }
 
 
-export default new DOMUpdater();
+export default new DOMUpdater()
