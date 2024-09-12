@@ -90,7 +90,7 @@ class DOMUpdater {
                 }
             } else if (this.isSameNode(oldChild, newChild)) {
                 // Update existing child
-                this.updateChild(oldChild, newChild, oldElement, update, ignore);
+                this.updateChild(oldChild, newChild, update, ignore);
                 oldIndex++;
                 newIndex++;
             } else {
@@ -111,13 +111,7 @@ class DOMUpdater {
         }
     }
 
-    isSameNode(node1, node2) {
-        return (
-            node1.nodeType === node2.nodeType && node1.nodeName === node2.nodeName
-        );
-    }
-
-    updateChild(oldChild, newChild, parentElement, update, ignore) {
+    updateChild(oldChild, newChild, update, ignore) {
         if (this.shouldIgnore(oldChild, ignore)) {
             return;
         }
@@ -129,9 +123,21 @@ class DOMUpdater {
                 }
             } else if (oldChild.nodeType === Node.ELEMENT_NODE) {
                 this.updateAttributes(oldChild, newChild);
+                // Always update children, regardless of the 'update' selector
+                this.updateChildren(oldChild, newChild, [], ignore);
+            }
+        } else {
+            // If the element itself shouldn't be updated, still update its children
+            if (oldChild.nodeType === Node.ELEMENT_NODE) {
                 this.updateChildren(oldChild, newChild, update, ignore);
             }
         }
+    }
+
+    isSameNode(node1, node2) {
+        return (
+            node1.nodeType === node2.nodeType && node1.nodeName === node2.nodeName
+        );
     }
 
     preserveAttributes(element, originalAttributes, newParentElement) {
@@ -192,3 +198,4 @@ class DOMUpdater {
 
 
 export default new DOMUpdater()
+
